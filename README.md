@@ -1,168 +1,90 @@
 # IPL API
 
-A production-ready REST API for IPL cricket data, built with **FastAPI**, **Supabase (PostgreSQL)**, and deployable on **Railway**.
+A free REST API for IPL cricket data — every match, every ball, every player, going back to the first season. Data comes from [Cricsheet](https://cricsheet.org/matches/).
 
-Data is sourced from [Cricsheet](https://cricsheet.org/matches/) JSON match files covering all IPL seasons.
-
----
-
-## Overview
-
-| Layer | Technology |
-|---|---|
-| Framework | FastAPI (Python) |
-| Database | Supabase (PostgreSQL via `supabase-py`) |
-| Auth | API key (SHA-256 HMAC, stored as hashes) |
-| Rate limiting | 100 requests / day per key, tracked in DB |
-| Deployment | Railway (`railway.toml`) |
+Use it to build dashboards, fantasy tools, stats explorers, or anything else you want to do with ball-by-ball IPL data.
 
 ---
 
-## Getting Started (Local)
+## Quick start
 
-### 1. Clone and install
-
-```bash
-git clone <your-repo-url>
-cd ipl-api
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
+You need three things to make a request: a base URL, an API key, and an endpoint.
 
 ```bash
-cp .env.example .env
-# Edit .env and fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, API_KEY_SECRET
-```
-
-### 3. Set up the database
-
-In your Supabase project's SQL editor, run both SQL files in order:
-
-```sql
--- 1. Create tables
-\i sql/schema.sql
-
--- 2. Create indexes
-\i sql/indexes.sql
-```
-
-Or paste their contents directly into the Supabase dashboard SQL editor.
-
-### 4. Seed data
-
-See [Seeding Data](#seeding-data) below.
-
-### 5. Run the API
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Visit [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API explorer.
-
----
-
-## Seeding Data
-
-### Download IPL JSONs from Cricsheet
-
-1. Go to [https://cricsheet.org/matches/](https://cricsheet.org/matches/)
-2. Download the **IPL JSON** zip file
-3. Extract it to a local folder, e.g. `./data/ipl_json/`
-
-### Run the seed script
-
-```bash
-python scripts/seed.py ./data/ipl_json
-```
-
-The script is fully **idempotent** — it safely skips matches already in the database. You can re-run it whenever new match files are added.
-
-Sample output:
-
-```
-Found 1247 JSON files in ./data/ipl_json
-
-[1/1247] Loaded: 335982.json
-[2/1247] Loaded: 335983.json
-[3/1247] Skipped: 335984.json   ← already in DB
-...
-
---- Summary ---
-Loaded:  1244
-Skipped: 3
-Errors:  0
-Total:   1247
-```
-
----
-
-## Authentication
-
-### Register for an API key
-
-```bash
+# 1. Register your email to get a key (one-time)
 curl -X POST https://your-api.railway.app/v1/register \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com"}'
+
+# 2. Use the key in every other request
+curl https://your-api.railway.app/v1/matches?season=2023 \
+  -H "x-api-key: your_key_here"
 ```
 
-Response:
+That's it. The rest of this guide is reference.
+
+---
+
+## Getting an API key
+
+`POST /v1/register` with your email returns a key:
 
 ```json
 {
-  "api_key": "your_key_here",
+  "api_key": "abc123...",
   "message": "Store this key safely. It will not be shown again.",
   "rate_limit": "100 requests/day"
 }
 ```
 
-The plaintext key is shown **once** and never stored. Copy it immediately.
+Important things to know:
 
-### Pass the key in requests
-
-Include the key in the `x-api-key` header:
-
-```bash
-curl https://your-api.railway.app/v1/matches \
-  -H "x-api-key: your_key_here"
-```
+- **The key is shown once.** Copy it into a password manager or `.env` file immediately — there is no "recover key" endpoint.
+- **One key per email.** Registering the same email twice returns `409 Conflict`.
+- **Pass the key as `x-api-key`** in every request to `/v1/...`. Missing or invalid keys return `401`.
 
 ---
 
-## Rate Limits
+## Rate limits
 
-- **100 requests per day** per API key
-- Limit resets at midnight UTC
-- Exceeding the limit returns `429 Too Many Requests`
+- **100 requests per day** per key
+- Counter resets at midnight UTC
+- Over the limit → `429 Too Many Requests`
+
+If 100/day isn't enough for what you're building, reach out.
+
+---
+
+## Browse interactively
+
+The fastest way to explore is the live Swagger UI at:
+
+```
+https://your-api.railway.app/docs
+```
+
+You can paste your API key in the "Authorize" button and call any endpoint from the browser.
 
 ---
 
 ## Endpoints
 
-All endpoints are prefixed with `/v1`.
-
-### Registration
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/register` | Register email and receive an API key |
+All endpoints are `GET` (except `/register`) and live under `/v1`.
 
 ### Matches
 
-| Method | Path | Query Params | Description |
-|---|---|---|---|
-| `GET` | `/v1/matches` | `season`, `team`, `venue` | List all matches |
-| `GET` | `/v1/matches/{id}` | — | Match detail with innings summaries |
-| `GET` | `/v1/matches/{id}/scorecard` | — | Full batting & bowling scorecard |
-| `GET` | `/v1/matches/{id}/deliveries` | — | Ball-by-ball delivery log |
+| Path | What you get |
+|---|---|
+| `/v1/matches` | List of matches. Filter with `?season=2023`, `?team=Mumbai`, `?venue=Wankhede` |
+| `/v1/matches/{id}` | One match — teams, toss, result, innings totals |
+| `/v1/matches/{id}/scorecard` | Full batting & bowling card for both innings |
+| `/v1/matches/{id}/deliveries` | Ball-by-ball: every delivery with batter, bowler, runs, wickets |
 
-**Example — list matches for IPL 2023:**
+Example — list IPL 2023 matches:
 
 ```bash
-curl "/v1/matches?season=2023" -H "x-api-key: ..."
+curl "https://your-api.railway.app/v1/matches?season=2023" \
+  -H "x-api-key: $KEY"
 ```
 
 ```json
@@ -180,24 +102,16 @@ curl "/v1/matches?season=2023" -H "x-api-key: ..."
 ]
 ```
 
-### Teams
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/v1/teams` | List all teams |
-| `GET` | `/v1/teams/{id}` | Team detail with win/loss record by season |
-| `GET` | `/v1/teams/{id}/players` | All players who have batted for this team |
-
 ### Players
 
-| Method | Path | Query Params | Description |
-|---|---|---|---|
-| `GET` | `/v1/players` | `name` | List/search players |
-| `GET` | `/v1/players/{id}` | — | Player detail |
-| `GET` | `/v1/players/{id}/batting` | — | Career batting stats |
-| `GET` | `/v1/players/{id}/bowling` | — | Career bowling stats |
+| Path | What you get |
+|---|---|
+| `/v1/players` | List players. Search with `?name=kohli` |
+| `/v1/players/{id}` | Player profile |
+| `/v1/players/{id}/batting` | Career batting: runs, average, strike rate, 50s/100s, HS |
+| `/v1/players/{id}/bowling` | Career bowling: wickets, economy, average, best figures |
 
-**Example — batting stats:**
+Example — Kohli's batting stats:
 
 ```json
 {
@@ -214,33 +128,50 @@ curl "/v1/matches?season=2023" -H "x-api-key: ..."
 }
 ```
 
----
+### Teams
 
-## Deploying to Railway
-
-1. Push this repo to GitHub.
-2. In [Railway](https://railway.app), create a **New Project → Deploy from GitHub repo**.
-3. Add the following environment variables in the Railway dashboard:
-
-   | Variable | Value |
-   |---|---|
-   | `SUPABASE_URL` | Your Supabase project URL |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Your service role key |
-   | `API_KEY_SECRET` | A long random secret string |
-
-4. Railway auto-detects `railway.toml` and deploys with:
-   ```
-   uvicorn app.main:app --host 0.0.0.0 --port $PORT
-   ```
-5. Visit your Railway-assigned domain to confirm the API is live.
+| Path | What you get |
+|---|---|
+| `/v1/teams` | List of all teams |
+| `/v1/teams/{id}` | Overall W/L record + season-by-season breakdown |
+| `/v1/teams/{id}/players` | Every player who has batted for the team |
 
 ---
 
-## Contributing
+## Common recipes
 
-1. Fork the repository and create a feature branch.
-2. Make your changes — keep new routes RESTful and add them to the appropriate router file.
-3. Test locally with `uvicorn app.main:app --reload`.
-4. Open a pull request with a clear description of your change.
+**"What's the score of match 42?"**
+```bash
+curl https://your-api.railway.app/v1/matches/42/scorecard -H "x-api-key: $KEY"
+```
 
-Please do not commit `.env` files or credentials.
+**"Find a player by name, then get their stats."**
+```bash
+curl "https://your-api.railway.app/v1/players?name=bumrah" -H "x-api-key: $KEY"
+# → use the id from the response
+curl https://your-api.railway.app/v1/players/57/bowling -H "x-api-key: $KEY"
+```
+
+**"All Mumbai Indians matches in 2024."**
+```bash
+curl "https://your-api.railway.app/v1/matches?season=2024&team=Mumbai" -H "x-api-key: $KEY"
+```
+
+**"Every ball of an IPL final."**
+```bash
+curl https://your-api.railway.app/v1/matches/1234/deliveries -H "x-api-key: $KEY"
+```
+
+---
+
+## Errors
+
+| Status | Meaning |
+|---|---|
+| `401 Unauthorized` | Missing or invalid `x-api-key` header |
+| `404 Not Found` | The match / player / team ID doesn't exist |
+| `409 Conflict` | Email already registered |
+| `422 Unprocessable Entity` | Bad input (e.g. invalid email format) |
+| `429 Too Many Requests` | You've hit the 100/day limit |
+
+---
